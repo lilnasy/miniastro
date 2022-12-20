@@ -3,7 +3,7 @@
 
 import * as asyncIterable from './asyncIterable.ts'
 import { compile }        from './cachedCompiler.ts'
-import { join }           from 'https://deno.land/std@0.170.0/path/mod.ts'
+import { join, relative } from 'https://deno.land/std@0.170.0/path/mod.ts'
 import { match, P }       from 'https://github.com/lilnasy/ts-pattern/raw/main/src/index.ts'
 
 
@@ -25,19 +25,27 @@ match(Deno.args)
 /***** ACTIONS *****/
 
 async function build(sourceDir: string) {
-    const routesDir = Deno.readDir(sourceDir)
-    const entrypoint = await createEntrypoint(routesDir)
-    await mkdirWriteFile('.miniastro/main.ts', entrypoint)
-    await resolveSpecifiers('.miniastro/main.ts', sourceDir)
+    const entrypointPath = getAbsolutePath('.miniastro/pages/server.ts')
+
+    const pagesPath      = getAbsolutePath(sourceDir)
+    const sourceEntries  = Deno.readDir(pagesPath)
+    const entrypointFile = await createEntrypoint(sourceEntries)
+
+    await mkdirWriteFile(entrypointPath, entrypointFile)
+    await resolveSpecifiers({ entrypointPath, pagesPath })
 }
 
-async function run(sourceDir: string) {
-    const routesDir      = Deno.readDir(sourceDir)
-    const entrypoint     = await createEntrypoint(routesDir)
+async function run(pagesDir: string) {
     const tempDir        = await Deno.makeTempDir({ prefix: 'miniastro' })
-    const entrypointPath = join(tempDir, 'main.ts')
-    await mkdirWriteFile(entrypointPath, entrypoint)
-    await resolveSpecifiers(entrypointPath, sourceDir)
+    const entrypointPath = join(tempDir, 'pages', 'server.ts')
+
+    const pagesPath      = getAbsolutePath(pagesDir)
+    const sourceEntries  = Deno.readDir(pagesPath)
+    const entrypointFile = await createEntrypoint(sourceEntries)
+
+    await mkdirWriteFile(entrypointPath, entrypointFile)
+    await resolveSpecifiers({ entrypointPath, pagesPath })
+
     const server = Deno.run({ cmd: [ "deno", "run", "-A", entrypointPath ] })
     await server.status()
 }
@@ -48,26 +56,30 @@ async function run(sourceDir: string) {
 function mkdirWriteFile(path: string, content: string) {
     return Deno.writeTextFile(path, content)
             .catch(async _ => {
-                const splitPath = path.split('/')
-                await Deno.mkdir(splitPath.slice(0, splitPath.length - 1).join('/'))
+		const targetDir = join(path, '..')
+                await Deno.mkdir(targetDir, { recursive: true })
                 return Deno.writeTextFile(path, content)
             })
 }
 
-async function resolveSpecifiers(currentFilePath: string, routesDir: string) {
+async function resolveSpecifiers(
+    { currentPath, entrypointPath, pagesPath }
+    : { currentPath?: string, entrypointPath: string, pagesPath: string }
+) {
+    const currentFilePath = currentPath ?? entrypointPath 
     const currentFile = await Deno.readTextFile(currentFilePath)
     const importFileNames = currentFile.match(regexForAstroImports)
     
     if (importFileNames === null) return
     
     const rewritingImports = importFileNames.map(async name => {
-        const sourceFilePath = join(Deno.cwd(), routesDir, name)
+        const pagesToCwd     = relative(join(entrypointPath, '..'), join(currentFilePath, '..'))
+        const sourceFilePath = join(pagesPath, pagesToCwd, name)
         const targetFilePath = join(currentFilePath, '..', name) + '.ts'
-        console.log({ sourceFilePath, targetFilePath })
         const astroFile      = await Deno.readTextFile(sourceFilePath)
         const tsFile         = await compile(astroFile)
         await mkdirWriteFile(targetFilePath, tsFile)
-        await resolveSpecifiers(targetFilePath, routesDir)
+        await resolveSpecifiers({ currentPath: targetFilePath, entrypointPath, pagesPath })
     })
     
     await Promise.all(rewritingImports)
@@ -113,6 +125,10 @@ async function createEntrypoint(routesDir: AsyncIterable<Deno.DirEntry>) {
 
 
 /***** HELPER FUNCTIONS *****/
+
+function getAbsolutePath(path: string) {
+    return join(Deno.cwd(), path)
+}
 
 function moduleName(fileName: string) {
     return fileName[0].toUpperCase() + fileName.substring(1, fileName.indexOf('.'))
