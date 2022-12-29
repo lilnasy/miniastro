@@ -19,13 +19,13 @@ const regexForAstroImports = /(?<=^import.+from ['"]).+astro(?=['"];?\s?$)/mg
 match(Deno.args)
 .with(['build', P.select()], build)
 .with(['run'  , P.select()], run)
-.otherwise(() => console.info('Your arguments don\'t match any pattern'))
+.otherwise(x => console.info('Your arguments don\'t match any pattern', x))
 
 
 /***** ACTIONS *****/
 
 async function build(sourceDir: string) {
-    const entrypointPath = getAbsolutePath('.miniastro/pages/server.ts')
+    const entrypointPath = getAbsolutePath('.miniastro/server.ts')
 
     const pagesPath      = getAbsolutePath(sourceDir)
     const sourceEntries  = Deno.readDir(pagesPath)
@@ -37,7 +37,7 @@ async function build(sourceDir: string) {
 
 async function run(pagesDir: string) {
     const tempDir        = await Deno.makeTempDir({ prefix: 'miniastro' })
-    const entrypointPath = join(tempDir, 'pages', 'server.ts')
+    const entrypointPath = join(tempDir, 'server.ts')
 
     const pagesPath      = getAbsolutePath(pagesDir)
     const sourceEntries  = Deno.readDir(pagesPath)
@@ -73,7 +73,7 @@ async function resolveSpecifiers(
     if (importFileNames === null) return
     
     const rewritingImports = importFileNames.map(async name => {
-        const pagesToCwd     = relative(join(entrypointPath, '..'), join(currentFilePath, '..'))
+        const pagesToCwd     = relative(join(entrypointPath, '../pages'), join(currentFilePath, '..'))
         const sourceFilePath = join(pagesPath, pagesToCwd, name)
         const targetFilePath = join(currentFilePath, '..', name) + '.ts'
         const astroFile      = await Deno.readTextFile(sourceFilePath)
@@ -98,23 +98,21 @@ async function createEntrypoint(routesDir: AsyncIterable<Deno.DirEntry>) {
     const fileNames = await asyncIterable.toArray(astroFileEntries, entry => entry.name)
     
     const serverImport = `import { serve } from 'https://deno.land/std@0.170.0/http/server.ts'`
-    const routerImport = `import { createRouter } from '${import.meta.resolve('./runtime.ts')}'`
+    const routerImport = `import { createRouter } from '${ import.meta.resolve('./runtime.ts') }'`
     
     const importStatements =
-        fileNames
-        .map(fileName => [moduleName(fileName), fileName])
-        .map(([m, f]) => `import ${m}, { scripts as ${m}_scripts, styles as ${m}_styles } from './${f}'`)
+        fileNames.map(fileName => `import * as ${ moduleName(fileName) } from './pages/${ fileName }'`)
     
     const moduleNames = fileNames.map(moduleName)
     
-    const routes = moduleNames.map(m => `{ name: '${m}', component: ${m}, styles: ${m}_styles, scripts: ${m}_scripts }`)
+    const routes = moduleNames.map(m => `{ name: '${m}', ...${m} }`)
     
     return [
         serverImport,
         routerImport,
         importStatements.join('\n'),
         '',
-        `const routes = [\n\t${routes.join(',\n\t')}\n]`,
+        `const routes = [\n\t${ routes.join(',\n\t') }\n]`,
         '',
         'const router = createRouter(routes)',
         '',

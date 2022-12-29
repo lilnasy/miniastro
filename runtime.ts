@@ -8,7 +8,7 @@ import { renderPage }   from 'https://esm.sh/astro@1.6.14/dist/runtime/server/re
 /***** TYPES *****/
 
 type AstroModule = {
-    component: Parameters<typeof renderPage>[1]
+    default: Parameters<typeof renderPage>[1]
     name: string,
     styles: Array<string>
     scripts: Array<string>
@@ -49,13 +49,13 @@ function renderAstro(request: Request, astroModule: AstroModule) {
         request,
         status      : 200,
         
-        styles      : new Set([ toSSRElement(astroModule.styles) ]),
+        styles      : new Set([ stylesToSSRElement(astroModule.styles) ]),
         
         params      : Object.fromEntries(new URL(request.url).searchParams),
         props       : {}
     })
     
-    const response = renderPage(result, astroModule.component, undefined, undefined, true)
+    const response = renderPage(result, astroModule.default, undefined, undefined, true)
     
     return response
 }
@@ -63,7 +63,7 @@ function renderAstro(request: Request, astroModule: AstroModule) {
 
 /***** HELPER FUNCTIONS *****/
 
-function toSSRElement(styles: string[]) {
+function stylesToSSRElement(styles: string[]) {
     const uniqueStyles = Array.from(new Set(styles))
     const children = uniqueStyles.join('')
     return { props: {}, children }

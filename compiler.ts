@@ -2,6 +2,7 @@
 /***** IMPORTS *****/
 
 import * as Compiler from 'https://esm.sh/@astrojs/compiler@0.31.0/browser?target=es2022'
+import * as SWC      from 'https://github.com/littledivy/deno_swc/raw/14842f9/mod.ts'
 
 
 /***** TYPES *****/
@@ -18,7 +19,7 @@ const wasmURL = 'https://esm.sh/@astrojs/compiler@0.31.0/astro.wasm'
 
 /***** MAIN *****/
 
-async function compile(astroFileContent: string) {
+async function compileAstro(astroFileContent: string) {
     
     await Compiler.initialize({ wasmURL })
     
@@ -43,38 +44,30 @@ async function compile(astroFileContent: string) {
                 
                 importedComponents.push(astroModule)
                 
-                return `import ${astroModule}, { styles as ${astroModule + '_styles'}, scripts as ${astroModule + '_scripts'} } from ${astroFilePath}`
+                return `import ${ astroModule }, * as __${ astroModule } from ${astroFilePath}`
             }
             return line
         })
         .join('\n')
     
-    const importedStyles = importedComponents.map(c => `${c}_styles`)
+    // "...__importedComponentX.styles, ...__importedComponentY.styles, "
+    const importedStyles = importedComponents.map(c => `...__${c}.styles`)
     
-    // TODO escape style contents IMPORTANT!!
-    const selfStyles     = css.map(style => `\`${style}\``)
+    const selfStyles = css.map(style => `\`${escape(style)}\``)
     
-    // export const styles = [ ...importedComponentX_styles, ...importedComponentY_styles, 'css { from: currentComponent }' ]
-    const exportCss = [
-        'export const styles  = [ ',
-        importedStyles.map(s => `...${s}, `).join(''),
-        selfStyles.join(', '),
-        ']'
-    ].join('')
+    // export const styles = [ ...__importedComponentX.styles, ...__importedComponentY.styles, 'css { from: currentComponent }' ]
+    const exportCss = `export const styles  = [ ${ [...importedStyles, ...selfStyles].join(', ') } ]`
     
-    const importedScripts = importedComponents.map(c => `${c}_scripts`)
+    // "...__importedComponentX.scripts, ...__importedComponentY.scripts, "
+    const importedScripts = importedComponents.map(c => `...__${c}.scripts`)
     
-    // TODO elide types
-    // TODO escape script.code contents IMPORTANT!!
-    const selfScripts     = scripts.filter(isInline).map(script => `\`${script.code}\``)
+    const selfScripts = scripts
+                        .filter(isInline)
+                        .map(script => compileTypescript(script.code))
+                        .map(code => `\`${escape(code)}\``)
     
-    // export const scripts = [ ...importedComponentX_scripts, ...importedComponentY_scripts, 'const code: string = "from current component"' ]
-    const exportJs = [
-        'export const scripts = [ ',
-        importedScripts.map(s => `...${s}, `).join(''),
-        selfScripts.join(', '),
-        ']'
-    ].join('')
+    // export const scripts = [ ...__importedComponentX.scripts, ...__importedComponentY.scripts, 'const code = "from current component"' ]
+    const exportJs = `export const scripts = [ ${ [...importedScripts, ...selfScripts].join(', ') } ]`
     
     return [
         newCode,
@@ -83,8 +76,25 @@ async function compile(astroFileContent: string) {
     ].join('\n')
 }
 
+function compileTypescript(input: string) {
+    const { code } = SWC.transform(input, {
+        jsc: {
+            target: "es2022",
+            parser: {
+                syntax: "typescript",
+                decorators: true
+            }
+        }
+    })
+    return code
+}
+
 
 /***** HELPER FUNCTIONS *****/
+
+function escape(value: string) {
+	return value.replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+}
 
 function isInline(script: HoistedScript): script is InlineScript {
     return script.type === 'inline'
@@ -93,4 +103,4 @@ function isInline(script: HoistedScript): script is InlineScript {
 
 /***** EXPORTS *****/
 
-export { compile }
+export { compileAstro as compile }
