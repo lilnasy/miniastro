@@ -1,36 +1,43 @@
 
 /***** IMPORTS *****/
 
-import { createResult } from 'https://esm.sh/astro@1.6.14/dist/core/render/result?target=es2022'
-import { renderPage }   from 'https://esm.sh/astro@1.6.14/dist/runtime/server/render/page?target=es2022'
+import { createResult } from 'https://esm.sh/astro@1.8.0/dist/core/render/result?target=es2022'
+import { renderPage }   from 'https://esm.sh/astro@1.8.0/dist/runtime/server/render/page?target=es2022'
 
 
 /***** TYPES *****/
 
-type AstroModule = {
-    default: Parameters<typeof renderPage>[1]
-    name: string,
-    styles: Array<string>
-    scripts: Array<string>
+type Route = {
+    module: Parameters<typeof renderPage>[1],
+    inlineStylesheet: string,
+    linkedScripts: Array<string>,
+    pattern: URLPattern
 }
 
 
 /***** MAIN *****/
 
-function createRouter(modules: Array<AstroModule>) {
-    const map = new Map(modules.map(m => [`/${m.name.toLowerCase()}`, m]))
+function createRouter(routes: Array<Route>) {
     return (request: Request) => {
         const url = new URL(request.url)
-        const maybeRoute = map.get(url.pathname)
-        if (maybeRoute === undefined) return new Response('', { status: 404 })
-        return renderAstro(request, maybeRoute)
+        const match = routes.find(({ pattern }) => pattern.test(url))
+        if (match === undefined) return new Response('', { status: 404 })
+        const patternParams = match.pattern.exec(url)!.pathname.groups
+        return renderAstro(request, match.module, patternParams, match.inlineStylesheet)
     }
 }
 
-function renderAstro(request: Request, astroModule: AstroModule) {
+function renderAstro(
+    request: Request,
+    component: Route['module'],
+    patternParams: Record<string, string>,
+    inlineStylesheet: string
+) {
     
     const url = new URL(request.url)
     
+    const searchParams = Object.fromEntries(url.searchParams)
+       
     const result = createResult({
         adapterName : undefined,
         logging     : {
@@ -42,34 +49,25 @@ function renderAstro(request: Request, astroModule: AstroModule) {
         site        : undefined,
         ssr         : true,
         renderers   : [],
-        resolve     : Promise.resolve,
+        resolve     : x => (console.info('createresult resolve called', x), Promise.resolve(x)),
         
         origin      : url.origin,
         pathname    : url.pathname,
         request,
         status      : 200,
         
-        styles      : new Set([ stylesToSSRElement(astroModule.styles) ]),
+        styles      : new Set([ { props: {}, children: inlineStylesheet } ]),
         
-        params      : Object.fromEntries(new URL(request.url).searchParams),
+        params      : { ...patternParams, ...searchParams },
         props       : {}
     })
     
-    const response = renderPage(result, astroModule.default, undefined, undefined, true)
+    const response = renderPage(result, component, undefined, undefined, true)
     
     return response
 }
 
 
-/***** HELPER FUNCTIONS *****/
-
-function stylesToSSRElement(styles: string[]) {
-    const uniqueStyles = Array.from(new Set(styles))
-    const children = uniqueStyles.join('')
-    return { props: {}, children }
-}
-
-
 /***** EXPORTS *****/
 
-export { createRouter }
+export { createRouter, type Route }
