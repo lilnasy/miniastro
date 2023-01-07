@@ -1,25 +1,25 @@
 
 /***** IMPORTS *****/
 
-import * as BASE64 from 'https://deno.land/std@0.170.0/encoding/base64.ts'
-	
+import * as BASE64 from 'https://deno.land/std@0.171.0/encoding/base64.ts'
+
 
 /***** TYPES *****/
 
 type HashOptions = Partial<{
-	algorithm: Parameters<typeof crypto.subtle.digest>[0]
-	truncateToLength: number
+    algorithm: Parameters<typeof crypto.subtle.digest>[0]
+    truncateToLength: number
 }>
 
 
 /***** MAIN *****/
 
 async function hash(input: string, options?: HashOptions) {
-	const byteArray     = new TextEncoder().encode(input)
-	const hashByteArray = await crypto.subtle.digest(options?.algorithm ?? 'SHA-512', byteArray)
+    const byteArray     = new TextEncoder().encode(input)
+    const hashByteArray = await crypto.subtle.digest(options?.algorithm ?? 'SHA-512', byteArray)
     const fullHash      = BASE64.encode(hashByteArray)
-	const truncatedHash = fullHash.substring(0, options?.truncateToLength ?? 32)
-	return truncatedHash
+    const truncatedHash = fullHash.substring(0, options?.truncateToLength ?? 32)
+    return truncatedHash
 }
 
 

@@ -1,43 +1,69 @@
 
 /***** IMPORTS *****/
 
-import { createResult } from 'https://esm.sh/astro@1.8.0/dist/core/render/result?target=es2022'
-import { renderPage }   from 'https://esm.sh/astro@1.8.0/dist/runtime/server/render/page?target=es2022'
+import { extname }      from 'https://deno.land/std@0.171/0/path/mod.ts'
+import { contentType }  from 'https://deno.land/std@0.171.0/media_types/content_type.ts'
+import { createResult } from 'https://esm.sh/astro@1.9.0/dist/core/render/result?target=es2022'
+import { renderPage }   from 'https://esm.sh/astro@1.9.0/dist/runtime/server/render/page?target=es2022'
 
 
 /***** TYPES *****/
 
-type Route = {
-    module: Parameters<typeof renderPage>[1],
-    inlineStylesheet: string,
-    linkedScripts: Array<string>,
-    pattern: URLPattern
+type StaticRoute = {
+    type: 'static'
+    pattern: string
+    path: URL
 }
+
+type DynamicRoute = {
+    type: 'dynamic'
+    pattern: string
+    module: Parameters<typeof renderPage>[1]
+    inlineStylesheet: string
+    linkedScripts: Array<string>
+}
+
+type Route = StaticRoute | DynamicRoute
 
 
 /***** MAIN *****/
 
 function createRouter(routes: Array<Route>) {
-    return (request: Request) => {
+    
+    const patterns = routes.map(r => [new URLPattern({ pathname: r.pattern }), r] satisfies [URLPattern, Route])
+    
+    return async (request: Request) => {
+        
         const url = new URL(request.url)
-        const match = routes.find(({ pattern }) => pattern.test(url))
+        
+        const match = patterns.find(([ pattern ]) => pattern.test(url))
+        
         if (match === undefined) return new Response('', { status: 404 })
-        const patternParams = match.pattern.exec(url)!.pathname.groups
-        return renderAstro(request, match.module, patternParams, match.inlineStylesheet)
+        
+        const [pattern, route] = match
+        
+        if (route.type === 'static') {
+            const { readable } = await Deno.open(route.path)
+            const mimeType = contentType(extname(route.path.pathname))
+            return new Response(readable, { headers: { 'Content-Type': mimeType ?? 'application/binary' } })
+        }
+        
+        const patternParams = pattern.exec(url)!.pathname.groups
+        
+        return renderAstro(request, route, patternParams)
     }
 }
 
 function renderAstro(
     request: Request,
-    component: Route['module'],
-    patternParams: Record<string, string>,
-    inlineStylesheet: string
+    { module, inlineStylesheet, linkedScripts }: DynamicRoute,
+    patternParams: Record<string, string>
 ) {
     
     const url = new URL(request.url)
     
     const searchParams = Object.fromEntries(url.searchParams)
-       
+    
     const result = createResult({
         adapterName : undefined,
         logging     : {
@@ -56,13 +82,14 @@ function renderAstro(
         request,
         status      : 200,
         
+        scripts     : new Set(linkedScripts.map(src => ({ props: { src, type: 'module' }, children: '' }))),
         styles      : new Set([ { props: {}, children: inlineStylesheet } ]),
         
         params      : { ...patternParams, ...searchParams },
         props       : {}
     })
     
-    const response = renderPage(result, component, undefined, undefined, true)
+    const response = renderPage(result, module, undefined, undefined, true)
     
     return response
 }
@@ -70,4 +97,5 @@ function renderAstro(
 
 /***** EXPORTS *****/
 
-export { createRouter, type Route }
+export { createRouter }
+export type { Route }

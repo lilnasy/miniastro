@@ -1,16 +1,13 @@
 
 /***** IMPORTS *****/
 
-import * as Compiler from 'https://esm.sh/@astrojs/compiler@0.31.3/browser?target=es2022'
-import * as SWC      from 'https://github.com/littledivy/deno_swc/raw/14842f9/mod.ts'
+import * as Compiler from 'https://esm.sh/@astrojs/compiler@0.31.4/browser?target=es2022'
+import * as SWC      from './swc.ts'
 import { hash }      from './hash.ts'
 
 
 /***** TYPES *****/
 
-type ExternalScript = { type: 'external', src: string }
-type InlineScript   = { type: 'inline', code: string, map: string }
-type HoistedScript  = ExternalScript | InlineScript
 type CompileResult  = Awaited<ReturnType<typeof compileAstro>>
 
 
@@ -19,8 +16,7 @@ type CompileResult  = Awaited<ReturnType<typeof compileAstro>>
 const astroImportSpecifiers = /(?<=^\s*import\s+[\w$]+\s+from\s+['"]).+astro(?=['"]\s*;?\s*?$)/mg
 const cssImports            = /^import ".+\?astro&type=style&index=\d+&lang.css";$/mg
 
-const wasmURL = 'https://esm.sh/@astrojs/compiler@0.31.3/astro.wasm'
-
+const wasmURL = import.meta.resolve('./compiler@0.31.4.wasm')
 
 /***** MAIN *****/
 
@@ -32,7 +28,7 @@ async function compileAstro(astroFileContent: string) {
         experimentalStaticExtraction: true,
         projectRoot: 'file://xacs/cs/ca',
         resolvePath: _ => Promise.resolve('/sada/das'),
-        internalURL: 'https://esm.sh/astro@1.8.0/runtime/server?target=es2022'
+        internalURL: 'https://esm.sh/astro@1.9.0/runtime/server?target=es2022'
     })
     
     const importedModules = Array.from(_code.match(astroImportSpecifiers) ?? [])
@@ -46,7 +42,7 @@ async function compileAstro(astroFileContent: string) {
     const scripts = await Promise.all(_scripts.map(async script => {
         if (script.type === 'external') throw new Error('external scripts are not supported', { cause: script })
         const _hash  = await hash(script.code, { truncateToLength: 8 })
-        const result = compileTypescript(script.code)
+        const result = await compileTypescript(script.code)
         return { hash: _hash, code: result }
     }))
     
@@ -55,8 +51,8 @@ async function compileAstro(astroFileContent: string) {
     return { code, metadata }
 }
 
-function compileTypescript(input: string) {
-    const { code } = SWC.transform(input, {
+async function compileTypescript(input: string) {
+    const { code } = await SWC.transform(input, {
         jsc: {
             target: "es2022",
             parser: {
