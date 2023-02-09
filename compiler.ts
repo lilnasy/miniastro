@@ -1,14 +1,14 @@
 
 /***** IMPORTS *****/
 
-import * as Compiler from 'https://esm.sh/@astrojs/compiler@0.31.4/browser?target=es2022'
+import * as Compiler from 'astro-compiler'
 import * as SWC      from './swc.ts'
 import { hash }      from './hash.ts'
 
 
 /***** TYPES *****/
 
-type CompileResult  = Awaited<ReturnType<typeof compileAstro>>
+type CompileResult = Awaited<ReturnType<typeof compileAstro>>
 
 
 /***** CONSTANTS *****/
@@ -16,7 +16,8 @@ type CompileResult  = Awaited<ReturnType<typeof compileAstro>>
 const astroImportSpecifiers = /(?<=^\s*import\s+[\w$]+\s+from\s+['"]).+astro(?=['"]\s*;?\s*?$)/mg
 const cssImports            = /^import ".+\?astro&type=style&index=\d+&lang.css";$/mg
 
-const wasmURL = import.meta.resolve('./compiler@0.31.4.wasm')
+const wasmURL = 'https://unpkg.com/browse/@astrojs/compiler@1.1.0/astro.wasm'
+
 
 /***** MAIN *****/
 
@@ -25,10 +26,8 @@ async function compileAstro(astroFileContent: string) {
     await Compiler.initialize({ wasmURL })
     
     const { code: _code, scripts: _scripts, ..._metadata } = await Compiler.transform(astroFileContent, {
-        experimentalStaticExtraction: true,
-        projectRoot: 'file://xacs/cs/ca',
         resolvePath: _ => Promise.resolve('/sada/das'),
-        internalURL: 'https://esm.sh/astro@1.9.0/runtime/server?target=es2022'
+        internalURL: 'https://esm.sh/astro@2.0.9/runtime/server?target=es2022'
     })
     
     const importedModules = Array.from(_code.match(astroImportSpecifiers) ?? [])
@@ -54,9 +53,9 @@ async function compileAstro(astroFileContent: string) {
 async function compileTypescript(input: string) {
     const { code } = await SWC.transform(input, {
         jsc: {
-            target: "es2022",
+            target: 'es2022',
             parser: {
-                syntax: "typescript",
+                syntax: 'typescript',
                 decorators: true
             }
         }

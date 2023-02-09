@@ -1,7 +1,7 @@
 
 /***** IMPORTS *****/
 
-import * as BASE64 from 'https://deno.land/std@0.171.0/encoding/base64.ts'
+import * as BASE64 from 'std/encoding/base64.ts'
 
 
 /***** TYPES *****/

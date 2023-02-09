@@ -52,7 +52,7 @@ async function toArray<A>(
 function identity<T>(input: T) {
     return input
 }
-    
+
 async function filterResult<A>(
     iterator: AsyncIterator<A>,
     filterFunction: (input: A) => boolean | Promise<boolean>

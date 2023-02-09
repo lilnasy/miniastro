@@ -1,0 +1,12 @@
+{
+    "lock": false,
+    "imports": {
+        "std/"           : "https://deno.land/std@0.177.0/",
+        "astro/"         : "https://esm.sh/astro@2.0.9/",
+        "astro-compiler" : "https://esm.sh/@astrojs/compiler@1.1.0/browser?target=es2022",
+        "ts-pattern"     : "https://github.com/lilnasy/ts-pattern/raw/bb593e3/src/index.ts",
+        "swc"            : "https://deno.land/x/swc@0.2.1/lib/deno_swc.generated.js",
+        "swc-types"      : "https://esm.sh/@swc/core@1.2.212/types.d.ts",
+        "lz4"            : "https://deno.land/x/lz4@v0.1.2/mod.ts"
+    }
+}

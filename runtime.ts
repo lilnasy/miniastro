@@ -1,10 +1,9 @@
-
 /***** IMPORTS *****/
 
-import { extname }      from 'https://deno.land/std@0.171/0/path/mod.ts'
-import { contentType }  from 'https://deno.land/std@0.171.0/media_types/content_type.ts'
-import { createResult } from 'https://esm.sh/astro@1.9.0/dist/core/render/result?target=es2022'
-import { renderPage }   from 'https://esm.sh/astro@1.9.0/dist/runtime/server/render/page?target=es2022'
+import { extname }      from 'std/path/mod.ts'
+import { contentType }  from 'std/media_types/content_type.ts'
+import { createResult } from 'astro/dist/core/render/result?target=es2022'
+import { renderPage }   from 'astro/dist/runtime/server/render/page?target=es2022'
 
 
 /***** TYPES *****/

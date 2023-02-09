@@ -1,4 +1,3 @@
-
 // TODO
 // refactor so files are written only once at the end
 // currently files are written then read from then written again
@@ -9,8 +8,8 @@
 
 import * as asyncIterable from './asyncIterable.ts'
 import { compile }        from './cachedCompiler.ts'
-import { join, relative } from 'https://deno.land/std@0.171.0/path/mod.ts'
-import { match, P }       from 'https://github.com/lilnasy/ts-pattern/raw/main/src/index.ts'
+import { join, relative } from 'std/path/mod.ts'
+import { match, P }       from 'ts-pattern'
 
 
 /***** TYPES *****/
