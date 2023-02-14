@@ -191,28 +191,21 @@ async function recursivelyCompileWriteTsFiles(
     } = await importedModules.reduce(async (acc, im) => {
         if (im.specifier.startsWith('./') !== true) return acc
 
-        const sourcePath_     = join(sourcePath, '..', im.specifier)
-        const _sourceContents = await Deno.readTextFile(sourcePath_)
+        const imSourcePath    = join(sourcePath, '..', im.specifier)
+        const _sourceContents = await Deno.readTextFile(imSourcePath)
         const hash            = await hashString(_sourceContents, { truncateToLength: 8 })
+        const imTargetPath    = join(targetPath, '..', hash) + '.js'
         
-        const imSourcePath = join(sourcePath, '..', im.specifier)
-        const imTargetPath = join(targetPath, '..', hash) + '.js'
-        const { code: sourceFileContents, writtenFiles: writtenFiles_ }
+        const { code: _, writtenFiles: writtenFiles_ }
             = await recursivelyCompileWriteTsFiles(_sourceContents, imSourcePath, imTargetPath)
 
-        const targetFilePath     = join(targetPath, '..', hash) + '.js'
-        const targetFileContents = await compileTypescript(sourceFileContents, sourcePath_)
-        
-        await Deno.writeTextFile(targetFilePath, targetFileContents)
-        
-        
         // target file path relative to the script that imports it
-        const relativePath   = relative(join(targetPath, '..'), targetFilePath).replaceAll('\\', '/')
+        const relativePath   = relative(join(targetPath, '..'), imTargetPath).replaceAll('\\', '/')
         
         const { code: _code, writtenFiles: writtenFiles__ } = await acc 
         const { start, end } = im.span
         const code           = _code.slice(0, start) + './' + relativePath + _code.slice(end)
-        const writtenFiles   = [ ...writtenFiles_, ...writtenFiles__, targetFilePath ]
+        const writtenFiles   = [ ...writtenFiles_, ...writtenFiles__, imTargetPath ]
         const newAcc         = { code, writtenFiles }
         
         return newAcc
