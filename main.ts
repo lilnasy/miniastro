@@ -69,7 +69,7 @@ async function build(pagesDir: string, targetDir: string) {
     
     const staticFiles = routes.reduce((filePaths, route) => [...filePaths, ...route.linkedScripts], new Array<string>)
     
-    const runtimeContents    = await Deno.readTextFile(new URL(import.meta.resolve('./runtime.ts')))
+    const runtimeContents    = await fetch(new URL(import.meta.resolve('./runtime.ts'))).then(r => r.text())
     const newRuntimeContents = rewriteRuntimeImportSpecifiers(runtimeContents)
     const runtimePath        = join(targetDir, 'runtime.ts')
     await mkdirWriteFile(runtimePath, newRuntimeContents)
