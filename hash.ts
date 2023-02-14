@@ -1,7 +1,7 @@
 
 /***** IMPORTS *****/
 
-import * as BASE64 from 'std/encoding/base64.ts'
+import * as BASE58 from 'std/encoding/base58.ts'
 
 
 /***** TYPES *****/
@@ -14,10 +14,10 @@ type HashOptions = Partial<{
 
 /***** MAIN *****/
 
-async function hash(input: string, options?: HashOptions) {
+async function hashString(input: string, options?: HashOptions) {
     const byteArray     = new TextEncoder().encode(input)
     const hashByteArray = await crypto.subtle.digest(options?.algorithm ?? 'SHA-512', byteArray)
-    const fullHash      = BASE64.encode(hashByteArray)
+    const fullHash      = BASE58.encode(hashByteArray)
     const truncatedHash = fullHash.substring(0, options?.truncateToLength ?? 32)
     return truncatedHash
 }
@@ -25,4 +25,4 @@ async function hash(input: string, options?: HashOptions) {
 
 /***** EXPORTS *****/
 
-export { hash, type HashOptions }
+export { hashString, type HashOptions }

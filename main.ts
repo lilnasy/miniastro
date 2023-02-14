@@ -1,15 +1,18 @@
-// TODO
-// refactor so files are written only once at the end
-// currently files are written then read from then written again
-// -- refactor 'buildTarget' to not write to the file system directly
-// -- only 'build' should write to the file system
 
 /***** IMPORTS *****/
 
 import * as asyncIterable from './asyncIterable.ts'
-import { compile }        from './cachedCompiler.ts'
-import { join, relative } from 'std/path/mod.ts'
-import { match, P }       from 'ts-pattern'
+import { hashString }     from './hash.ts'
+import { compileAstro }   from './astro-compiler.ts'
+import {
+    compileTypescript,
+    parseTsImports
+}                         from './typescript.ts'
+import {
+    join,
+    relative,
+    isAbsolute
+}                         from 'std/path/mod.ts'
 
 
 /***** TYPES *****/
@@ -20,21 +23,13 @@ type Compilation = {
 }
 
 type Route = {
-    moduleSpecifier: string
-    inlineStylesheet: string
-    linkedScripts: Array<string>
+    moduleSpecifier  : string
+    inlineStylesheet : string
+    linkedScripts    : Array<string>
 }
 
 
 /***** MAIN *****/
-
-match(Deno.args)
-.with(['build', P.select()], buildInCWD)
-.with(['run'  , P.select()], buildAndRun)
-.otherwise(x => console.info("Your arguments don't match any pattern", x))
-
-
-/***** ACTIONS *****/
 
 async function buildInCWD(pagesDir: string) {
     const targetDir = join(Deno.cwd(), '.miniastro')
@@ -42,16 +37,16 @@ async function buildInCWD(pagesDir: string) {
 }
 
 async function buildAndRun(pagesDir: string) {
-    const tempDir = await Deno.makeTempDir({ prefix: 'miniastro' })
+    const tempDir        = await Deno.makeTempDir({ prefix: 'miniastro' })
     const entrypointPath = await build(pagesDir, tempDir)
-    const server = Deno.run({ cmd: [ 'deno', 'run', '-A', entrypointPath ] })
+    const server         = Deno.run({ cmd: [ 'deno', 'run', '-A', entrypointPath ] })
     await server.status()
 }
 
 
 async function build(pagesDir: string, targetDir: string) {
     
-    const fsTree         = await readDirThoroughly(pagesDir)
+    const fsTree         = await readDirNested(pagesDir)
     const astroFilePaths = fsTree.filter(path => path.endsWith('.astro'))
     
     const compilations = astroFilePaths.map(astroFilePath => ({
@@ -60,10 +55,13 @@ async function build(pagesDir: string, targetDir: string) {
     }))
     
     const _routes = compilations.map(async c => {
-        const { styles, scriptPaths } = await buildTarget([c])
-        const moduleSpecifier         = relative(targetDir, c.targetTsFilePath).replaceAll('\\', '/')
-        const inlineStylesheet        = Array.from(new Set(styles)).join(' ')
-        const linkedScripts           = Array.from(new Set(scriptPaths)).map(x => '/' + relative(join(c.targetTsFilePath, '..'), x).replaceAll('\\', '/'))
+        const { styles, scriptPaths } = await recursivelyCompileWriteAstroFiles([c])
+        const moduleSpecifier  = relative(targetDir, c.targetTsFilePath).replaceAll('\\', '/')
+        const inlineStylesheet = Array.from(new Set(styles)).join(' ')
+        const linkedScripts    = Array.from(new Set(scriptPaths))
+                                      .map(x => '/' + relative(join(c.targetTsFilePath, '..'), x)
+                                      .replaceAll('\\', '/'))
+        
         return { moduleSpecifier, inlineStylesheet, linkedScripts } satisfies Route
     })
     
@@ -71,6 +69,11 @@ async function build(pagesDir: string, targetDir: string) {
     
     const staticFiles = routes.reduce((filePaths, route) => [...filePaths, ...route.linkedScripts], new Array<string>)
     
+    const runtimeContents    = await Deno.readTextFile(new URL(import.meta.resolve('./runtime.ts')))
+    const newRuntimeContents = rewriteRuntimeImportSpecifiers(runtimeContents)
+    const runtimePath        = join(targetDir, 'runtime.ts')
+    await mkdirWriteFile(runtimePath, newRuntimeContents)
+
     const entrypointPath     = join(targetDir, 'server.ts')
     const entrypointContents = createEntrypoint(routes, staticFiles)
     
@@ -81,8 +84,17 @@ async function build(pagesDir: string, targetDir: string) {
 
 /***** PROCEDURES *****/
 
+// runtime.ts is included in the final app but includes
+// references to the import map which need to be replaced
+// with their static urls
+function rewriteRuntimeImportSpecifiers(runtimeContents: string) {
+    const specifierRegEx     = /(?<=import.*(from\s+)?["'])(.*)(?=["'];?)/g
+    const newRuntimeContents = runtimeContents.replaceAll(specifierRegEx, specifier => import.meta.resolve(specifier))
+    return newRuntimeContents
+}
+
 function createEntrypoint(routes: Array<Route>, staticFiles: Array<string>) {
-        
+    
     const importStatements =
         routes.map(({ moduleSpecifier }) => `import ${ moduleName(moduleSpecifier) } from './${ moduleSpecifier }'`)
     
@@ -102,7 +114,7 @@ path: new URL(import.meta.resolve(${ JSON.stringify('./pages' + path) })) \
     
     return `\
 import { serve } from "https://deno.land/std@0.171.0/http/server.ts"
-import { createRouter } from "${ import.meta.resolve('./runtime.ts') }"
+import { createRouter } from "./runtime.ts"
 
 ${ importStatements.join('\n') }
 
@@ -114,10 +126,10 @@ serve(router)
 `
 }
 
-async function buildTarget(
-        compilations: Array<Compilation>,
-        styles = new Array<string>,
-        scriptPaths = new Array<string>
+async function recursivelyCompileWriteAstroFiles(
+    compilations :    Array<Compilation>,
+    styles      = new Array<string>,
+    scriptPaths = new Array<string>
 ): Promise<{ styles: typeof styles, scriptPaths: typeof scriptPaths }> {
 
     const [compilation, ...remaingingCompilations] = compilations
@@ -125,32 +137,92 @@ async function buildTarget(
     if (compilation === undefined) return { styles, scriptPaths }
     
     const { sourceAstroFilePath, targetTsFilePath } = compilation
-     
-    const astroFile          = await Deno.readTextFile(sourceAstroFilePath)
-    const { code, metadata } = await compile(astroFile)
+    
+    const astroFileContents = await Deno.readTextFile(sourceAstroFilePath)
+    const { code, css: moreStyles, scripts, importedModules } = await compileAstro(astroFileContents, sourceAstroFilePath)
     
     const writingFile = mkdirWriteFile(targetTsFilePath, code)
     
-    const _compiledScriptPaths = metadata.scripts.map(async ({ hash, code }) => {
-        const clientSideJsFilePath = join(targetTsFilePath, '..', hash) + '.js'
-        await Deno.writeTextFile(clientSideJsFilePath, code)
-        return clientSideJsFilePath
+    const __moreScriptPaths = scripts.map(async (script, index) => {
+        assert(script.type !== 'external', 'external scripts are not supported', { cause: script })
+        
+        const hash       = await hashString(script.code, { truncateToLength: 8 })
+        const sourcePath = `${sourceAstroFilePath}#inline-script${index > 0 ? '-' + (index + 1) : ''}`
+        const targetPath = join(targetTsFilePath, '..', hash + '.js')
+        
+        const { code: _, writtenFiles } = await recursivelyCompileWriteTsFiles(script.code, sourcePath, targetPath)
+        
+        return writtenFiles
     })
     
-    const compiledScriptPaths = await Promise.all(_compiledScriptPaths)
+    const _moreScriptPaths = await Promise.all(__moreScriptPaths)
+    const moreScriptPaths  = _moreScriptPaths.flat()
     
-    const moreCompilations = metadata.importedModules.map(relativeAstroPath => ({
+    const moreCompilations = importedModules.map(relativeAstroPath => ({
         sourceAstroFilePath: join(sourceAstroFilePath, '..', relativeAstroPath),
         targetTsFilePath   : join(targetTsFilePath, '..', relativeAstroPath) + '.ts'
     }))
     
     await writingFile
     
-    return buildTarget(
-        [...remaingingCompilations, ...moreCompilations],
-        [...styles, ...metadata.css],
-        [...scriptPaths, ...compiledScriptPaths]
+    return recursivelyCompileWriteAstroFiles(
+        [ ...remaingingCompilations, ...moreCompilations ],
+        [ ...styles,                 ...moreStyles       ],
+        [ ...scriptPaths,            ...moreScriptPaths  ]
     )
+}
+
+async function recursivelyCompileWriteTsFiles(
+    code       : string,
+    sourcePath : string,
+    targetPath : string
+): Promise<{ code: string, writtenFiles: Array<string> }> {
+    // read the source file
+    // parse to get all the imports
+    // recursively parse, compile, and write the imported files first
+    // replace the import specifier with the path of the written file
+    // compile the current file
+    // write it to disk
+    const importedModules = await parseTsImports(code, sourcePath)
+
+    const {
+        code: newCode,
+        writtenFiles
+    } = await importedModules.reduce(async (acc, im) => {
+        if (im.specifier.startsWith('./') !== true) return acc
+
+        const sourcePath_     = join(sourcePath, '..', im.specifier)
+        const _sourceContents = await Deno.readTextFile(sourcePath_)
+        const hash            = await hashString(_sourceContents, { truncateToLength: 8 })
+        
+        const imSourcePath = join(sourcePath, '..', im.specifier)
+        const imTargetPath = join(targetPath, '..', hash) + '.js'
+        const { code: sourceFileContents, writtenFiles: writtenFiles_ }
+            = await recursivelyCompileWriteTsFiles(_sourceContents, imSourcePath, imTargetPath)
+
+        const targetFilePath     = join(targetPath, '..', hash) + '.js'
+        const targetFileContents = await compileTypescript(sourceFileContents, sourcePath_)
+        
+        await Deno.writeTextFile(targetFilePath, targetFileContents)
+        
+        
+        // target file path relative to the script that imports it
+        const relativePath   = relative(join(targetPath, '..'), targetFilePath).replaceAll('\\', '/')
+        
+        const { code: _code, writtenFiles: writtenFiles__ } = await acc 
+        const { start, end } = im.span
+        const code           = _code.slice(0, start) + './' + relativePath + _code.slice(end)
+        const writtenFiles   = [ ...writtenFiles_, ...writtenFiles__, targetFilePath ]
+        const newAcc         = { code, writtenFiles }
+        
+        return newAcc
+    }, Promise.resolve({ code, writtenFiles: new Array<string> }))
+
+    const targetContents  = await compileTypescript(newCode, sourcePath)
+
+    await Deno.writeTextFile(targetPath, targetContents)
+
+    return { code: targetContents, writtenFiles: [ ...writtenFiles, targetPath ] }
 }
 
 
@@ -162,7 +234,7 @@ async function mkdirWriteFile(path: string, content: string) {
     return await Deno.writeTextFile(path, content)
 }
 
-async function readDirThoroughly(currentDir: string, relativePathToStart = ''): Promise<Array<string>> {
+async function readDirNested(currentDir: string, relativePathToStart = ''): Promise<Array<string>> {
     
     const entries = await asyncIterable.toArray(Deno.readDir(currentDir))
     
@@ -171,7 +243,7 @@ async function readDirThoroughly(currentDir: string, relativePathToStart = ''): 
                             .map(entry => join(relativePathToStart, entry.name))
     
     const subdirectories   = entries.filter(entry => entry.isDirectory)
-    const _nestedFilePaths = subdirectories.map(({ name }) => readDirThoroughly(join(currentDir, name), join(relativePathToStart, name)))
+    const _nestedFilePaths = subdirectories.map(({ name }) => readDirNested(join(currentDir, name), join(relativePathToStart, name)))
     const nestedFilePaths  = (await Promise.all(_nestedFilePaths)).flat()
     
     return [...directFilePaths, ...nestedFilePaths]
@@ -181,23 +253,32 @@ function pattern(astroFileName: string) {
     return astroFileName
            .replace('pages/', '/')
            .replace('.astro.ts', '')
+           .replace(/index$/, '')
            // [param] -> :param
            .replaceAll(/\[\w+\]/g, x => ':' + x.slice(1, x.length - 1))
 }
 
 function moduleName(moduleSpecifier: string) {
     
-    // if (isAbsolute(moduleSpecifier)) throw new Error('Absolute path provided to `moduleName`', { cause: moduleSpecifier })
+    if (isAbsolute(moduleSpecifier)) throw new Error('Absolute path provided to `moduleName`', { cause: moduleSpecifier })
     
     const result = moduleSpecifier
-                   .replaceAll('.astro.ts', '')
+                   .replace(/.astro.ts$/, '')
                    .replaceAll(/[\\/]./g, x => x.slice(1).toUpperCase())
                    .replaceAll('.', '')
                    .replaceAll(/\[\w+\]/g, x => '$' + x.slice(1, x.length - 1) + '$')
     
-    return uppercaseFirstLetter(result)
+    const uppercaseFirstLetter = result[0].toUpperCase() + result.substring(1)
+
+    return uppercaseFirstLetter
 }
 
-function uppercaseFirstLetter(input: string) {
-    return input[0].toUpperCase() + input.substring(1)
+function assert(assertion: boolean, msg = "Assertion failed", cause?: unknown): asserts assertion {
+    if (assertion === true) return
+    else throw new Error(msg, { cause })
 }
+
+
+/***** EXPORTS *****/
+
+export { buildInCWD, buildAndRun }

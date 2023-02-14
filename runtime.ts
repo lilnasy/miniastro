@@ -2,8 +2,8 @@
 
 import { extname }      from 'std/path/mod.ts'
 import { contentType }  from 'std/media_types/content_type.ts'
-import { createResult } from 'astro/dist/core/render/result?target=es2022'
-import { renderPage }   from 'astro/dist/runtime/server/render/page?target=es2022'
+import { createResult } from 'astro/core/render/result?target=es2022'
+import { renderPage }   from 'astro/runtime/server/render/page?target=es2022'
 
 
 /***** TYPES *****/
