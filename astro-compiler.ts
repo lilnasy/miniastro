@@ -78,15 +78,40 @@ async function compileAstro(astroFileContent: string) {
 function loadAstroIfNeeded() {
     if (astroCompilerLoaded === true) return 'ok'
     console.time('Astro compiler loaded')
-    return Compiler.initialize({ wasmURL: astroWasmPath }).catch(e => {
-        throw new Error('Astro compiler failed to load: ' + e)
-    }).then(() => {
+    return loadAstro(astroWasmPath).then(() => {
         console.timeEnd('Astro compiler loaded')
         astroCompilerLoaded = true
         return 'ok' as const
     })
 }
 
+async function loadAstro(wasmUrl: string) {
+    
+    const request     = new Request(wasmUrl)
+    const maybeCached = await cache.match(request)
+    
+    if (maybeCached !== undefined) {
+        const blob = await maybeCached.blob()
+        const url  = URL.createObjectURL(blob)
+
+        return Compiler.initialize({ wasmURL: url }).catch(e => {
+            throw new Error('Astro compiler failed to load: ' + e)
+        })
+    }
+    
+    const response = await fetch(wasmUrl)
+
+    cache.put(request, response.clone())
+
+    const blob     = await response.blob()
+    const url      = URL.createObjectURL(blob)
+    
+    return Compiler.initialize({ wasmURL: url }).catch(e => {
+        throw new Error('Astro compiler failed to load: ' + e)
+    })
+
+}
+    
 
 /***** EXPORTS *****/
 

@@ -118,13 +118,38 @@ async function parseTsImports (input: string) {
 function loadSwcIfNeeded() {
     if (swcLoaded === true) return 'ok'
     console.time('SWC loaded')
-    return SWC.default(swcWasmPath).catch(e => {
-        throw new Error('SWC failed to load: ' + e)
-    }).then(() => {
+    return loadSwc(swcWasmPath).then(() => {
         console.timeEnd('SWC loaded')
         swcLoaded = true
         return 'ok' as const
     })
+}
+
+async function loadSwc(wasmUrl: string) {
+    
+    const request     = new Request(wasmUrl)
+    const maybeCached = await cache.match(request)
+    
+    if (maybeCached !== undefined) {
+        const blob = await maybeCached.blob()
+        const url  = URL.createObjectURL(blob)
+        
+        return SWC.default(url).catch(e => {
+            throw new Error('SWC failed to load: ' + e)
+        })
+    }
+    
+    const response = await fetch(wasmUrl)
+    
+    cache.put(request, response.clone())
+    
+    const blob = await response.blob()
+    const url  = URL.createObjectURL(blob)
+    
+    return SWC.default(url).catch(e => {
+        throw new Error('SWC failed to load: ' + e)
+    })
+    
 }
 
 /***** EXPORTS *****/
